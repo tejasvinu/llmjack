@@ -82,10 +82,14 @@ export interface GameState {
   isPlayerTurn: boolean;
   round: number;
   gamePhase: GamePhase; // Add game phase to track state
+  aiIsThinking: { playerId: string | null; action: 'betting' | 'playing' | null }; // For AI "thinking" indicator
 }
 
 // Action types
 export enum GameActionType {
+  SET_AI_THINKING = 'set_ai_thinking',
+  CLEAR_AI_THINKING = 'clear_ai_thinking',
+  UPDATE_MESSAGE = 'update_message', // New action for updating game message
   DEAL = 'deal',
   HIT = 'hit',
   STAND = 'stand',
@@ -101,7 +105,10 @@ export enum GameActionType {
 }
 
 // Game actions
-export type GameAction = 
+export type GameAction =
+  | { type: GameActionType.SET_AI_THINKING, payload: { playerId: string, action: 'betting' | 'playing' } }
+  | { type: GameActionType.CLEAR_AI_THINKING }
+  | { type: GameActionType.UPDATE_MESSAGE, payload: { message: string, type?: 'info' | 'warning' | 'error' } } // Define payload
   | { type: GameActionType.DEAL }
   | { type: GameActionType.HIT }
   | { type: GameActionType.STAND }
@@ -110,6 +117,7 @@ export type GameAction =
   | { type: GameActionType.REMOVE_PLAYER, payload: { id: string } }
   | { type: GameActionType.PLACE_BET, payload: { playerId: string, amount: number } }
   | { type: GameActionType.NEXT_PLAYER }
-  | { type: GameActionType.START_BETTING_PHASE }  | { type: GameActionType.PROCESS_DEALER_TURN, payload: { players: Player[], dealer: any, deck: Card[] } }
+  | { type: GameActionType.START_BETTING_PHASE }
+  | { type: GameActionType.PROCESS_DEALER_TURN, payload: { players: Player[], dealer: any, deck: Card[] } }
   | { type: GameActionType.ADD_AI_PLAYER, payload: { model: AIModel } } // Use model instead of strategy
   | { type: GameActionType.TOGGLE_PLAYER_TYPE, payload: { playerId: string, playerType: PlayerType, model?: AIModel } }; // Use model instead of strategy

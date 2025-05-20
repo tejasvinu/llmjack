@@ -98,6 +98,14 @@ function calculateVisibleScore(hand: Card[]): number {
   return score;
 }
 
+// Custom Error for Timeout
+export class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
 // Get AI betting decision
 export async function getAIBetDecision(
   playerChips: number,
@@ -107,36 +115,61 @@ export async function getAIBetDecision(
   What's a reasonable bet amount? Consider standard betting strategies.
   Respond with ONLY a number between 10 and ${Math.min(playerChips, 500)}, with no explanation.`;
 
-  const provider = getProviderForModel(modelId); // Determine provider
+  const provider = getProviderForModel(modelId);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
 
   try {
-    // Use API route instead of direct SDK call
+    console.log(`Fetching AI bet decision using model ${modelId}...`);
     const response = await fetch('/api/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt,
-        provider: provider, // Send determined provider
-        model: modelId      // Send the specific model ID
-      })
+        provider: provider,
+        model: modelId
+      }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error("AI Bet Decision Error Response:", errorData);
-      throw new Error(`AI request failed: ${response.status} ${response.statusText}`);
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        // If response.json() fails, use status text
+        errorData = { error: response.statusText };
+      }
+      console.error(`AI Bet Decision API Error (${response.status}):`, errorData);
+      throw new Error(`AI request failed: ${response.status} ${response.statusText} - ${errorData?.error || 'Unknown API error'}`);
     }
 
     const data = await response.json();
-    const bet = parseInt(data.text.trim().replace(/[^0-9]/g, ''));
-    // Ensure bet is within valid range
-    const validBet = isNaN(bet) ? 50 : Math.min(Math.max(10, bet), playerChips, 500);
+    const betText = data.text.trim().replace(/[^0-9]/g, '');
+    const bet = parseInt(betText);
+
+    if (isNaN(bet)) {
+      console.warn(`AI (${modelId}) returned invalid bet: "${data.text}". Using fallback.`);
+      // Fallback handled by the caller, but we signal failure by throwing an error or returning null if preferred.
+      // For now, let's throw an error to be caught by the caller.
+      throw new Error(`AI (${modelId}) returned non-numeric bet.`);
+    }
+    
+    // Ensure bet is within valid range - this should ideally be handled by the caller's fallback too
+    const validBet = Math.min(Math.max(10, bet), playerChips, 500);
+    console.log(`AI (${modelId}) bet decision: ${validBet}`);
     return validBet;
-  } catch (error) {
-    console.error('Error getting AI bet decision:', error);
-    // Fallback bet logic
-    const fallbackBet = Math.max(10, Math.min(Math.floor(playerChips * 0.05), 100));
-    return Math.min(fallbackBet, playerChips); // Ensure fallback doesn't exceed chips
+
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.error(`AI bet decision request timed out after 10 seconds for model ${modelId}.`);
+      throw new TimeoutError(`AI bet decision request timed out for model ${modelId}`);
+    }
+    console.error(`Error getting AI bet decision for model ${modelId}:`, error.message);
+    // Re-throw the error to be handled by the caller, which will apply fallback logic
+    throw error;
   }
 }
 
@@ -148,38 +181,58 @@ export async function getAIDecision(
   players: Player[],
   modelId: AIModel // Use the specific model ID passed from the player
 ): Promise<'HIT' | 'STAND'> {
-  // Always use the detailed prompt now
   const prompt = formatGameStateForAI(playerHand, playerScore, dealerUpCard, players);
-  const provider = getProviderForModel(modelId); // Determine provider
+  const provider = getProviderForModel(modelId);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds timeout
 
   try {
-    // Use API route instead of direct SDK call
+    console.log(`Fetching AI decision for player using model ${modelId}...`);
     const response = await fetch('/api/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt,
-        provider: provider, // Send determined provider
-        model: modelId      // Send the specific model ID
-      })
+        provider: provider,
+        model: modelId
+      }),
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error("AI Decision Error Response:", errorData);
-      throw new Error(`AI request failed: ${response.status} ${response.statusText} - ${errorData?.error || 'Unknown error'}`);
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        errorData = { error: response.statusText };
+      }
+      console.error(`AI Decision API Error (${response.status}) for model ${modelId}:`, errorData);
+      throw new Error(`AI request failed: ${response.status} ${response.statusText} - ${errorData?.error || 'Unknown API error'}`);
     }
 
     const data = await response.json();
-
-    // Extract decision from response - look for HIT or STAND
     const decisionText = data.text.toUpperCase();
-    const decision = decisionText.includes('HIT') ? 'HIT' : 'STAND'; // Default to STAND if HIT not found
-    console.log(`AI (${modelId}) decision: ${decision} (Raw: "${data.text.substring(0, 50)}...")`);
+    
+    if (!decisionText.includes('HIT') && !decisionText.includes('STAND')) {
+      console.warn(`AI (${modelId}) returned ambiguous decision: "${data.text}". Defaulting to STAND.`);
+      // Fallback to STAND if neither HIT nor STAND is clearly found.
+      // Consider throwing an error if a more strict response is required.
+      return 'STAND'; 
+    }
+
+    const decision = decisionText.includes('HIT') ? 'HIT' : 'STAND';
+    console.log(`AI (${modelId}) decision: ${decision} (Raw: "${data.text.substring(0,100)}...")`);
     return decision;
-  } catch (error) {
-    console.error(`Error getting AI decision for model ${modelId}:`, error);
-    // Fallback to basic strategy
-    return playerScore < 17 ? 'HIT' : 'STAND';
+
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      console.error(`AI decision request timed out after 10 seconds for model ${modelId}.`);
+      throw new TimeoutError(`AI decision request timed out for model ${modelId}`);
+    }
+    console.error(`Error getting AI decision for model ${modelId}:`, error.message);
+    // Re-throw the error to be handled by the caller, which will apply fallback logic
+    throw error;
   }
 }

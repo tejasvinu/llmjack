@@ -62,29 +62,41 @@ const Hand: React.FC<HandProps> = ({
 
   return (
     <motion.div 
-      className={`flex flex-col items-center gap-4 p-4 rounded-lg ${
-        isActive ? 'bg-green-700/30 ring-2 ring-yellow-500' : ''
+      className={`flex flex-col items-center gap-4 p-4 rounded-lg shadow-xl transition-all duration-300 ease-in-out ${
+        isActive 
+          ? 'bg-green-800/50 ring-4 ring-yellow-400 scale-105 shadow-yellow-500/30' 
+          : 'bg-gray-800/30' // Default background for non-active players
       }`}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
       <div className="flex flex-col items-center min-h-[60px]">
-        <h2 className="text-xl font-bold">{label}</h2>
+        <h2 className={`text-2xl font-bold ${isActive ? 'text-yellow-300' : 'text-white'}`}>{label}</h2>
+        {isActive && !isDealer && (
+          <motion.div 
+            className="text-xs font-semibold text-yellow-200 -mt-2 mb-1"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            {label.includes("AI") ? "AI's Turn" : "Your Turn"}
+          </motion.div>
+        )}
         <div className="flex flex-wrap gap-2 items-center justify-center">
           {hand.length > 0 && (
             <motion.div 
-              className="text-lg"
+              className={`text-lg ${isActive ? 'font-semibold text-yellow-100' : 'text-gray-200'}`}
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
-              key={`${label}-score-${score}`}
+              key={`${label}-score-${score}`} // Ensures re-render on score change for animation
             >
-              Score: {isDealer ? (isGameOver ? score : '?') : score} 
+              Score: {isDealer ? (isGameOver || hand.every(c => c.faceUp) ? score : '?') : score} 
             </motion.div>
           )}
           
           {!isDealer && (
-            <div className="text-sm bg-blue-900 px-2 py-1 rounded-full whitespace-nowrap">
+            <div className={`text-sm px-2 py-1 rounded-full whitespace-nowrap ${isActive ? 'bg-yellow-700 text-white' : 'bg-blue-900 text-gray-300'}`}>
               Chips: ${chips}
             </div>
           )}

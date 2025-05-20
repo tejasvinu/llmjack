@@ -8,19 +8,21 @@ interface PlayerManagerProps {
     name: string, 
     bet: number,
     playerType?: PlayerType,
-    aiModel?: AIModel, // Add aiModel
+    aiModel?: AIModel,
     isActive?: boolean,
   }>;
   dispatch: React.Dispatch<any>;
   currentPlayerIndex: number;
   gamePhase: GamePhase;
+  aiIsThinking?: { playerId: string | null; action: 'betting' | 'playing' | null }; // Add aiIsThinking
 }
 
 const PlayerManager: React.FC<PlayerManagerProps> = ({ 
   players, 
   dispatch, 
   currentPlayerIndex,
-  gamePhase
+  gamePhase,
+  aiIsThinking 
 }) => {
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -98,6 +100,12 @@ const PlayerManager: React.FC<PlayerManagerProps> = ({
               {player.playerType === PlayerType.AI && (
                 <span className="text-xs bg-purple-600 rounded-full px-1.5 py-0.5 ml-1" title={`Model: ${player.aiModel || 'Default'}`}>
                   AI
+                </span>
+              )}
+              {/* AI Thinking Indicator */}
+              {aiIsThinking && aiIsThinking.playerId === player.id && (
+                <span className="text-xs text-yellow-300 ml-1 animate-pulse">
+                  ({aiIsThinking.action === 'betting' ? 'Betting' : 'Playing'}...)
                 </span>
               )}
               {player.bet > 0 && gamePhase === GamePhase.BETTING && (

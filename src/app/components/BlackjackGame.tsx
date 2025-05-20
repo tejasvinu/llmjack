@@ -63,6 +63,7 @@ const BlackjackGame: React.FC = () => {
         dispatch={dispatch}
         currentPlayerIndex={state.currentPlayerIndex}
         gamePhase={state.gamePhase}
+        aiIsThinking={state.aiIsThinking} // Pass down aiIsThinking state
       />
       
       <div className="w-full flex flex-col gap-10">

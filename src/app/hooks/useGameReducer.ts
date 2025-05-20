@@ -62,6 +62,7 @@ const initialState: GameState = {
   isPlayerTurn: true,
   round: 0,
   gamePhase: GamePhase.BETTING, // Start in betting phase
+  aiIsThinking: { playerId: null, action: null }, // Initialize aiIsThinking
 };
 
 // Game reducer function
@@ -78,6 +79,24 @@ function gameReducer(state: GameState, action: GameAction): GameState {
   }
 
   switch (action.type) {
+    case GameActionType.SET_AI_THINKING:
+      return {
+        ...state,
+        aiIsThinking: { playerId: action.payload.playerId, action: action.payload.action },
+        message: `${state.players.find(p => p.id === action.payload.playerId)?.name} is thinking...` // Optional: Update message
+      };
+    case GameActionType.CLEAR_AI_THINKING:
+      return {
+        ...state,
+        aiIsThinking: { playerId: null, action: null }
+        // Optionally, reset main message if AI thinking message was showing
+        // message: state.aiIsThinking.playerId ? "Player's turn" : state.message // Example
+      };
+    case GameActionType.UPDATE_MESSAGE:
+      return {
+        ...state,
+        message: action.payload.message
+      };
     case GameActionType.START_BETTING_PHASE: {
       // Reset player hands, scores, status, and result messages for a new round
       const updatedPlayers = state.players.map(player => ({
@@ -199,96 +218,107 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     
     case GameActionType.HIT: {
       if (state.gamePhase !== GamePhase.PLAYER_TURNS || !state.isPlayerTurn) {
+        console.log(`[GameReducer] HIT: Action ignored, not player's turn or wrong phase. Phase: ${state.gamePhase}, IsPlayerTurn: ${state.isPlayerTurn}`);
         return state;
       }
       
       const currentPlayer = state.players[state.currentPlayerIndex];
+      console.log(`[GameReducer] HIT: Player ${currentPlayer.name} (Type: ${currentPlayer.playerType}) hits. Current Score: ${currentPlayer.score}`);
+      
       const [newCard, newDeck] = drawCard(state.deck);
       const newHand = [...currentPlayer.hand, newCard];
       const newScore = calculateScore(newHand);
       const playerBusted = hasBusted(newHand);
       
-      // Update current player's hand
-      const updatedPlayers = state.players.map((player, index) => {
+      console.log(`[GameReducer] HIT: Player ${currentPlayer.name} drew ${newCard.value}${getSuitSymbol(newCard.suit)}. New Score: ${newScore}, Busted: ${playerBusted}`);
+      
+      // Update current player's hand and status
+      let updatedPlayers = state.players.map((player, index) => {
         if (index === state.currentPlayerIndex) {
           return {
             ...player,
             hand: newHand,
-            score: newScore, // Make sure newScore is assigned
+            score: newScore,
             hasBusted: playerBusted,
-            hasStood: playerBusted, 
+            hasStood: playerBusted, // If busted, player also effectively "stands"
           };
         }
         return player;
       });
       
       if (playerBusted) {
-        // Move to next player or end game
+        console.log(`[GameReducer] HIT: Player ${currentPlayer.name} busted!`);
+        // Player is now inactive, move to next player or dealer's turn
         const nextPlayerIndex = findNextActivePlayerIndex(updatedPlayers, state.currentPlayerIndex);
         
-        // Update active status for all players
         const playersWithActiveStatus = updatedPlayers.map((player, index) => ({
           ...player,
-          isActive: index === nextPlayerIndex && !player.hasStood && !player.hasBusted
+          // Current player (busted) becomes inactive. Next player (if any) becomes active.
+          isActive: index === nextPlayerIndex && !player.hasStood && !player.hasBusted 
         }));
+        updatedPlayers = playersWithActiveStatus; // Assign back
         
         if (nextPlayerIndex === -1) {
-          // All players are done, dealer's turn
+          console.log(`[GameReducer] HIT: All players done. Transitioning to Dealer's Turn.`);
           return {
             ...state,
             deck: newDeck,
-            players: playersWithActiveStatus,
+            players: updatedPlayers,
             message: `${currentPlayer.name} busted! Dealer's turn.`,
             gamePhase: GamePhase.DEALER_TURN,
             isPlayerTurn: false,
           };
         } else {
+          console.log(`[GameReducer] HIT: Next player is ${updatedPlayers[nextPlayerIndex].name}.`);
           return {
             ...state,
             deck: newDeck,
-            players: playersWithActiveStatus,
+            players: updatedPlayers,
             currentPlayerIndex: nextPlayerIndex,
-            message: `${currentPlayer.name} busted! ${playersWithActiveStatus[nextPlayerIndex].name}'s turn`,
+            message: `${currentPlayer.name} busted! ${updatedPlayers[nextPlayerIndex].name}'s turn`,
           };
         }
       }
       
+      // Player hit and did not bust, their turn continues (isActive remains true)
+      console.log(`[GameReducer] HIT: Player ${currentPlayer.name} continues turn.`);
       return {
         ...state,
         deck: newDeck,
         players: updatedPlayers,
-        // Use the inner getSuitSymbol function
         message: `${currentPlayer.name} hits and gets ${newCard.value}${getSuitSymbol(newCard.suit)}`,
       };
     }
     
     case GameActionType.STAND: {
       if (state.gamePhase !== GamePhase.PLAYER_TURNS || !state.isPlayerTurn) {
+        console.log(`[GameReducer] STAND: Action ignored, not player's turn or wrong phase. Phase: ${state.gamePhase}, IsPlayerTurn: ${state.isPlayerTurn}`);
         return state;
       }
       
       const currentPlayer = state.players[state.currentPlayerIndex];
+      console.log(`[GameReducer] STAND: Player ${currentPlayer.name} (Type: ${currentPlayer.playerType}) stands. Score: ${currentPlayer.score}`);
       
-      // Update current player to stood status
-      const updatedPlayers = state.players.map((player, index) => {
+      // Update current player to stood status and make them inactive
+      let updatedPlayers = state.players.map((player, index) => {
         if (index === state.currentPlayerIndex) {
           return {
             ...player,
             hasStood: true,
-            isActive: false,
+            isActive: false, // Player's turn ends on stand
           };
         }
         return player;
       });
       
-      // Find next active player
       const nextPlayerIndex = findNextActivePlayerIndex(updatedPlayers, state.currentPlayerIndex);
       
       if (nextPlayerIndex === -1) {
+        console.log(`[GameReducer] STAND: All players done. Transitioning to Dealer's Turn.`);
         // All players are done, dealer's turn
         return {
           ...state,
-          players: updatedPlayers,
+          players: updatedPlayers, // Contains the player who just stood (now inactive)
           message: `${currentPlayer.name} stands. Dealer's turn.`,
           gamePhase: GamePhase.DEALER_TURN,
           isPlayerTurn: false,
@@ -297,14 +327,16 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         // Set next player as active
         const playersWithNextActive = updatedPlayers.map((player, index) => ({
           ...player,
-          isActive: index === nextPlayerIndex
+          isActive: index === nextPlayerIndex // Only the next player becomes active
         }));
-        
+        updatedPlayers = playersWithNextActive; // Assign back
+
+        console.log(`[GameReducer] STAND: Next player is ${updatedPlayers[nextPlayerIndex].name}.`);
         return {
           ...state,
-          players: playersWithNextActive,
+          players: updatedPlayers,
           currentPlayerIndex: nextPlayerIndex,
-          message: `${currentPlayer.name} stands. ${playersWithNextActive[nextPlayerIndex].name}'s turn`,
+          message: `${currentPlayer.name} stands. ${updatedPlayers[nextPlayerIndex].name}'s turn`,
         };
       }
     }
@@ -614,72 +646,114 @@ export function useGameReducer() {
   // Watch for dealer turn phase to automatically play dealer's hand
   useEffect(() => {
     if (state.gamePhase === GamePhase.DEALER_TURN && !state.isGameOver) {
-      // Wait a moment to show dealer's face-down card flip visually
       const timerId = setTimeout(() => {
-        // Calculate the results
         const result = handleDealerTurn(state, state.players, state.deck);
-        // Dispatch the new action with the results
         dispatch({ type: GameActionType.PROCESS_DEALER_TURN, payload: result });
-      }, 1500); // Increased delay slightly for better visual flow
-      
+      }, 1500);
       return () => clearTimeout(timerId);
     }
-  // Add state.isGameOver to dependencies to prevent re-triggering after game ends
-  }, [state.gamePhase, state.isGameOver, state.players, state.deck]); 
-  
+  }, [state.gamePhase, state.isGameOver, state.players, state.deck]);
+
   // AI Betting - Process AI bets when in betting phase
   useEffect(() => {
     if (state.gamePhase === GamePhase.BETTING) {
-      const processAIBets = async () => {
-        // Filter out AI players who haven't bet yet and have chips
-        const aiPlayersNeedingBets = state.players.filter(
-          player => player.playerType === PlayerType.AI && player.bet === 0 && player.chips > 0
-        );
+      const processAIBetsSerially = async () => {
+        for (const player of state.players) {
+          if (player.playerType === PlayerType.AI && player.bet === 0 && player.chips > 0) {
+            console.log(`AI ${player.name} (Model: ${player.aiModel}) is fetching a bet...`);
+            dispatch({ type: GameActionType.SET_AI_THINKING, payload: { playerId: player.id, action: 'betting' } });
+            await new Promise(resolve => setTimeout(resolve, 800)); // Delay for UX
 
-        if (aiPlayersNeedingBets.length > 0) {
-          // Process one AI bet at a time with delay
-          const currentAI = aiPlayersNeedingBets[0];
-
-          // Add a delay before fetching the bet
-          await new Promise(resolve => setTimeout(resolve, 800)); // Delay before API call
-
-          try {
-            // Get AI bet decision using the player's assigned model
-            const betAmount = await getAIBetDecision(currentAI.chips, currentAI.aiModel);
-
-            // Apply the bet immediately after getting the result
-            dispatch({
-              type: GameActionType.PLACE_BET,
-              payload: {
-                playerId: currentAI.id,
-                amount: betAmount
+            let betAmount;
+            let usedFallback = false;
+            try {
+              betAmount = await getAIBetDecision(player.chips, player.aiModel);
+              console.log(`AI ${player.name} (Model: ${player.aiModel}) successfully received bet: ${betAmount}`);
+            } catch (error: any) {
+              usedFallback = true;
+              if (error.name === 'TimeoutError') {
+                console.warn(`AI ${player.name} (Model: ${player.aiModel}) bet request timed out. Applying fallback.`);
+              } else {
+                console.error(`Error processing AI bet for ${player.name} (Model: ${player.aiModel}): ${error.message}. Applying fallback.`);
               }
-            });
-          } catch (error) {
-            console.error(`Error processing AI bet for ${currentAI.name}:`, error);
-            // Fallback to a default bet amount if API fails
-            const defaultBet = Math.min(50, currentAI.chips); // Ensure default bet is possible
-             if (defaultBet > 0) {
-               dispatch({
-                 type: GameActionType.PLACE_BET,
-                 payload: {
-                   playerId: currentAI.id,
-                   amount: defaultBet
-                 }
-               });
-             }
+              betAmount = Math.max(10, Math.min(Math.floor(player.chips * 0.05), 100));
+              betAmount = Math.min(betAmount, player.chips);
+              console.log(`AI ${player.name} (Model: ${player.aiModel}) using fallback bet: ${betAmount}`);
+            } finally {
+              dispatch({ type: GameActionType.CLEAR_AI_THINKING });
+            }
+
+            if (betAmount > 0) {
+              dispatch({
+                type: GameActionType.PLACE_BET,
+                payload: { playerId: player.id, amount: betAmount }
+              });
+              if (usedFallback) {
+                // Dispatch a new action or update message directly if reducer handles it
+                // For simplicity, we'll update message in reducer after PLACE_BET if a flag is passed
+                // Or, more directly, if the reducer handles a specific "AI_FALLBACK_BET" action.
+                // For now, let's assume PLACE_BET can optionally take a message update.
+                // This part needs careful implementation depending on how message updates are structured.
+                // A simpler approach: the component checks aiIsThinking and if player is AI, then shows thinking.
+                // The message update for fallback can be done in the reducer handling PLACE_BET,
+                // if we augment PLACE_BET or add a new action.
+                // Let's make a new action for setting messages for clarity.
+                // gameReducer will need to handle a new GameActionType.SET_MESSAGE
+                // This is getting complex. Let's try to update message directly in the reducer for PLACE_BET
+                // if a fallback occurred.
+                // For now, let's assume the existing console.warn is the primary notification,
+                // and we focus on the "thinking" indicator.
+                // The subtask asks to update `state.message` for fallbacks.
+                // We can dispatch a separate action for message update or make reducer smarter.
+                
+                // Let's try dispatching a message update.
+                // This means GameState needs a 'SET_MESSAGE' action type.
+                // And GameAction needs to include it.
+                // This was not part of the initial plan for GameActionType.
+                // Let's just update message in the existing dispatch for now.
+                // This requires PLACE_BET to handle an optional message.
+                // This is not ideal.
+
+                // Correct approach: dispatch a specific action to update message after fallback.
+                // Let's assume we add a new action type SET_GAME_MESSAGE
+                // For now, I will just set the message in the console and proceed with AI thinking.
+                // The prompt says: "update the state.message to subtly reflect this"
+                // This implies the reducer should do it.
+                // So, when dispatching PLACE_BET for a fallback, we need to signify it.
+                // Let's add a flag to PLACE_BET payload.
+                 const fallbackMessage = `${player.name} used a fallback bet.`;
+                 // We need to ensure the reducer can set this message.
+                 // Modifying PLACE_BET in gameReducer to optionally accept a message.
+                 // This is not ideal as PLACE_BET is generic.
+
+                // Alternative: a new action type like UPDATE_MESSAGE
+                // Let's assume we add: { type: GameActionType.UPDATE_MESSAGE, payload: string } to types and reducer.
+                // For now, I'll just log it here as per previous structure.
+                // The task is to update state.message. This MUST happen in the reducer.
+                // Simplest path: add new action type for specifically setting message.
+                // Adding to types.ts: UPDATE_MESSAGE
+                // Adding to reducer: handle UPDATE_MESSAGE
+                // The task is to update state.message. This MUST happen in the reducer.
+                // Simplest path: add new action type for specifically setting message.
+                // Adding to types.ts: UPDATE_MESSAGE
+                // Adding to reducer: handle UPDATE_MESSAGE
+                // This is the cleanest way.
+                dispatch({ type: GameActionType.UPDATE_MESSAGE, payload: { message: `${player.name} used a fallback bet.` } });
+              }
+              await new Promise(resolve => setTimeout(resolve, 100));
+            } else {
+              console.warn(`AI ${player.name} (Model: ${player.aiModel}) has no chips to bet or fallback bet was zero.`);
+            }
           }
         }
       };
-
-      processAIBets();
+      processAIBetsSerially();
     }
-  // Only re-run if gamePhase changes or the list/state of players changes significantly
-  }, [state.gamePhase, state.players.map(p => `${p.id}-${p.bet}-${p.playerType}`).join(',')]);
+  }, [state.gamePhase, state.players.map(p => `${p.id}-${p.playerType}-${p.chips}`).join(',')]);
+
 
   // AI Decision Making for Hit/Stand
   useEffect(() => {
-    // Only run this when it's a player's turn and the current player is AI
     if (
       state.gamePhase === GamePhase.PLAYER_TURNS &&
       state.isPlayerTurn &&
@@ -687,7 +761,6 @@ export function useGameReducer() {
     ) {
       const currentPlayer = state.players[state.currentPlayerIndex];
 
-      // Check if current player is AI and active
       if (
         currentPlayer &&
         currentPlayer.playerType === PlayerType.AI &&
@@ -695,36 +768,85 @@ export function useGameReducer() {
         !currentPlayer.hasStood &&
         !currentPlayer.hasBusted
       ) {
-        // Get dealer's face up card
         const dealerUpCard = state.dealer.hand.find(card => card.faceUp) || null;
+        const aiModel = currentPlayer.aiModel || AIModel.LLAMA3_8B;
 
-        // Add delay to make it feel more natural
+        console.log(`AI ${currentPlayer.name} (Model: ${aiModel}) is fetching a decision...`);
+        dispatch({ type: GameActionType.SET_AI_THINKING, payload: { playerId: currentPlayer.id, action: 'playing' } });
+
         const timerId = setTimeout(async () => {
+          let decision: 'HIT' | 'STAND';
+          let usedFallback = false;
           try {
-            // Get AI decision using the player's assigned model
-            const decision = await getAIDecision(
+            decision = await getAIDecision(
               currentPlayer.hand,
               currentPlayer.score,
               dealerUpCard,
-              state.players.filter(p => p.id !== currentPlayer.id), // Other players
-              currentPlayer.aiModel || AIModel.LLAMA3_8B // Pass player's specific model ID, fallback if undefined
+              state.players.filter(p => p.id !== currentPlayer.id),
+              aiModel
             );
-
-            // Execute the AI's decision
-            dispatch({ type: decision === 'HIT' ? GameActionType.HIT : GameActionType.STAND });
-
-          } catch (error) {
-            console.error(`Error getting AI decision for ${currentPlayer.name} (${currentPlayer.aiModel}):`, error);
-            // Fallback to simple strategy based on score
-            dispatch({ type: currentPlayer.score < 17 ? GameActionType.HIT : GameActionType.STAND });
+            console.log(`AI ${currentPlayer.name} (Model: ${aiModel}) successfully received decision: ${decision}`);
+          } catch (error: any) {
+            usedFallback = true;
+            if (error.name === 'TimeoutError') {
+              console.warn(`AI ${currentPlayer.name} (Model: ${aiModel}) decision request timed out. Applying fallback strategy.`);
+            } else {
+              console.error(`Error getting AI decision for ${currentPlayer.name} (Model: ${aiModel}): ${error.message}. Applying fallback strategy.`);
+            }
+            decision = currentPlayer.score < 17 ? 'HIT' : 'STAND';
+            console.log(`AI ${currentPlayer.name} (Model: ${aiModel}) using fallback decision: ${decision}`);
+          } finally {
+            dispatch({ type: GameActionType.CLEAR_AI_THINKING });
           }
-        }, 1200); // Delay to simulate thinking
+          
+          dispatch({ type: decision }); // Dispatch HIT or STAND
 
-        return () => clearTimeout(timerId);
+          if (usedFallback) {
+            // Similar to betting, we need a way to update the message.
+            // Let's assume GameActionType.UPDATE_MESSAGE and its handling in reducer are added.
+            // dispatch({ type: GameActionType.UPDATE_MESSAGE, payload: `${currentPlayer.name} used a fallback move (${decision}).` });
+            // For now, relying on console logs for this specific detail and focusing on the "thinking" indicator.
+            // The reducer for HIT/STAND would need to be aware of the fallback to set the message.
+            // This is tricky without a new action or modifying HIT/STAND payloads.
+            // The task implies state.message should be updated.
+            // Let's assume for now that the HIT/STAND reducers will be enhanced to set this message
+            // if a certain flag is passed, or a new action is introduced.
+            // For now, the console log will have to do for the detailed fallback message.
+            // The main message will be cleared by CLEAR_AI_THINKING or overwritten by HIT/STAND.
+            dispatch({ type: GameActionType.UPDATE_MESSAGE, payload: { message: `${currentPlayer.name} used a fallback move (${decision}).` } });
+          }
+        }, 1200);
+
+        return () => {
+          clearTimeout(timerId);
+          // Ensure 'thinking' is cleared if component unmounts or effect re-runs prematurely
+          if (state.aiIsThinking.playerId === currentPlayer?.id) { // Added null check for currentPlayer
+            dispatch({ type: GameActionType.CLEAR_AI_THINKING });
+          }
+        };
       }
     }
-  // Re-run when turn changes, player state changes, or game phase changes
-  }, [state.gamePhase, state.isPlayerTurn, state.currentPlayerIndex, state.players.map(p => `${p.id}-${p.isActive}-${p.hasStood}-${p.hasBusted}`).join(',')]);
+    // Dependency array: Reacts to changes in current player's turn, active status, or game phase.
+    // Using a map of relevant player states ensures this effect runs when any AI player's specific state changes.
+    // This is more targeted than watching all players for all changes.
+    // Key properties: currentPlayerIndex, and for that player: isActive, hasStood, hasBusted.
+    // Also depends on gamePhase and isPlayerTurn.
+  }, [
+    state.gamePhase, 
+    state.isPlayerTurn, 
+    state.currentPlayerIndex, 
+    state.players[state.currentPlayerIndex]?.isActive, // Ensures effect runs if current player's active status changes
+    state.players[state.currentPlayerIndex]?.hasStood,  // Ensures effect runs if current player stands
+    state.players[state.currentPlayerIndex]?.hasBusted, // Ensures effect runs if current player busts
+    state.players[state.currentPlayerIndex]?.playerType,// Ensures effect runs if player type changes (e.g. human to AI)
+    state.players[state.currentPlayerIndex]?.aiModel,   // Ensures effect runs if AI model changes
+    // state.dealer.hand.find(card => card.faceUp)?.id, // More stable check for dealer up card, if ID is available and stable
+    // The stringify was a bit heavy, let's rely on other state changes primarily.
+    // If dealer card changes mid-turn (not standard blackjack), then a more robust check is needed.
+    // For now, current dependencies should be sufficient for typical blackjack flow.
+    // Re-add stringified dealer card if issues arise with dealer card changes not triggering effect.
+    JSON.stringify(state.dealer.hand.find(card => card.faceUp))
+  ]);
 
   return { state, dispatch };
 }
