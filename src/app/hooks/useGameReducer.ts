@@ -1,4 +1,4 @@
-import { useReducer, useEffect } from 'react';
+import { useReducer, useEffect, useState, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import {
   GameState,
@@ -610,7 +610,10 @@ function handleDealerTurn(state: GameState, players: Player[], deck: Card[]) {
 // Custom hook for blackjack game
 export function useGameReducer() {
   const [state, dispatch] = useReducer(gameReducer, initialState);
-
+  const [aiActionInProgress, setAiActionInProgress] = useState(false);
+  // Add a ref to track player betting state
+  const playerBettingStateRef = useRef('');
+  
   // Watch for dealer turn phase to automatically play dealer's hand
   useEffect(() => {
     if (state.gamePhase === GamePhase.DEALER_TURN && !state.isGameOver) {
@@ -629,7 +632,18 @@ export function useGameReducer() {
   
   // AI Betting - Process AI bets when in betting phase
   useEffect(() => {
-    if (state.gamePhase === GamePhase.BETTING) {
+    // Update the ref with current player betting state
+    const newPlayerBettingState = state.players
+      .map(p => `${p.id}-${p.bet}-${p.playerType}`)
+      .join(',');
+      
+    // Only continue if the betting state has changed or game phase changed
+    if (state.gamePhase === GamePhase.BETTING && 
+        (playerBettingStateRef.current !== newPlayerBettingState || 
+         playerBettingStateRef.current === '')) {
+      // Store the new betting state
+      playerBettingStateRef.current = newPlayerBettingState;
+      
       const processAIBets = async () => {
         // Filter out AI players who haven't bet yet and have chips
         const aiPlayersNeedingBets = state.players.filter(
@@ -674,20 +688,19 @@ export function useGameReducer() {
 
       processAIBets();
     }
-  // Only re-run if gamePhase changes or the list/state of players changes significantly
-  }, [state.gamePhase, state.players.map(p => `${p.id}-${p.bet}-${p.playerType}`).join(',')]);
+  // Simpler dependency array that won't cause infinite loops
+  }, [state.gamePhase, state.players]);
 
   // AI Decision Making for Hit/Stand
   useEffect(() => {
-    // Only run this when it's a player's turn and the current player is AI
     if (
       state.gamePhase === GamePhase.PLAYER_TURNS &&
       state.isPlayerTurn &&
-      state.players.length > state.currentPlayerIndex
+      state.players.length > state.currentPlayerIndex &&
+      !aiActionInProgress // Check lock
     ) {
       const currentPlayer = state.players[state.currentPlayerIndex];
 
-      // Check if current player is AI and active
       if (
         currentPlayer &&
         currentPlayer.playerType === PlayerType.AI &&
@@ -695,36 +708,35 @@ export function useGameReducer() {
         !currentPlayer.hasStood &&
         !currentPlayer.hasBusted
       ) {
-        // Get dealer's face up card
+        setAiActionInProgress(true); // Set lock
         const dealerUpCard = state.dealer.hand.find(card => card.faceUp) || null;
-
-        // Add delay to make it feel more natural
         const timerId = setTimeout(async () => {
           try {
-            // Get AI decision using the player's assigned model
             const decision = await getAIDecision(
               currentPlayer.hand,
               currentPlayer.score,
               dealerUpCard,
-              state.players.filter(p => p.id !== currentPlayer.id), // Other players
-              currentPlayer.aiModel || AIModel.LLAMA3_8B // Pass player's specific model ID, fallback if undefined
+              state.players.filter(p => p.id !== currentPlayer.id),
+              currentPlayer.aiModel || AIModel.LLAMA3_8B
             );
-
-            // Execute the AI's decision
             dispatch({ type: decision === 'HIT' ? GameActionType.HIT : GameActionType.STAND });
-
           } catch (error) {
             console.error(`Error getting AI decision for ${currentPlayer.name} (${currentPlayer.aiModel}):`, error);
-            // Fallback to simple strategy based on score
             dispatch({ type: currentPlayer.score < 17 ? GameActionType.HIT : GameActionType.STAND });
+          } finally {
+            setAiActionInProgress(false); // Release lock
           }
-        }, 1200); // Delay to simulate thinking
+        }, 1200);
 
-        return () => clearTimeout(timerId);
+        return () => {
+          clearTimeout(timerId);
+          setAiActionInProgress(false); // Ensure lock is released on cleanup
+        };
       }
     }
-  // Re-run when turn changes, player state changes, or game phase changes
-  }, [state.gamePhase, state.isPlayerTurn, state.currentPlayerIndex, state.players.map(p => `${p.id}-${p.isActive}-${p.hasStood}-${p.hasBusted}`).join(',')]);
+  },
+  [state.gamePhase, state.isPlayerTurn, state.players, state.currentPlayerIndex, state.dealer.hand] // Removed aiActionInProgress
+);
 
   return { state, dispatch };
 }

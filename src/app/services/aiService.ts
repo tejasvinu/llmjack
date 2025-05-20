@@ -7,7 +7,7 @@ export enum AIProvider {
 }
 
 // Helper function to determine provider based on model ID
-function getProviderForModel(modelId: AIModel): AIProvider {
+export function getProviderForModel(modelId: AIModel): AIProvider {
   // Simple logic: if model ID includes 'gemini', assume Google, otherwise Groq.
   // This might need adjustment if more providers or different model naming conventions are used.
   if (modelId.includes('gemini')) {
@@ -122,18 +122,29 @@ export async function getAIBetDecision(
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error("AI Bet Decision Error Response:", errorData);
-      throw new Error(`AI request failed: ${response.status} ${response.statusText}`);
+      const errorData = await response.json().catch(() => ({})); // Attempt to parse JSON, default to empty object on failure
+      console.error(
+        `AI Bet Decision Error - Status: ${response.status}, StatusText: ${response.statusText}, Provider: ${provider}, Model: ${modelId}, ResponseBody: ${JSON.stringify(errorData)}`
+      );
+      throw new Error(`AI bet decision request failed: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    const bet = parseInt(data.text.trim().replace(/[^0-9]/g, ''));
+    // Enhanced parsing for bet amount
+    const betText = data.text?.trim().replace(/[^0-9]/g, '') || '';
+    const bet = parseInt(betText);
+
+    if (isNaN(bet) || bet <= 0) {
+      console.warn(`AI (${modelId}) provided invalid bet: "${data.text}". Using fallback.`);
+      const fallbackBet = Math.max(10, Math.min(Math.floor(playerChips * 0.05), 100));
+      return Math.min(fallbackBet, playerChips);
+    }
+    
     // Ensure bet is within valid range
-    const validBet = isNaN(bet) ? 50 : Math.min(Math.max(10, bet), playerChips, 500);
+    const validBet = Math.min(Math.max(10, bet), playerChips, 500);
     return validBet;
   } catch (error) {
-    console.error('Error getting AI bet decision:', error);
+    console.error(`Error in getAIBetDecision for model ${modelId}:`, error instanceof Error ? error.message : error);
     // Fallback bet logic
     const fallbackBet = Math.max(10, Math.min(Math.floor(playerChips * 0.05), 100));
     return Math.min(fallbackBet, playerChips); // Ensure fallback doesn't exceed chips
@@ -165,20 +176,32 @@ export async function getAIDecision(
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error("AI Decision Error Response:", errorData);
-      throw new Error(`AI request failed: ${response.status} ${response.statusText} - ${errorData?.error || 'Unknown error'}`);
+      const errorData = await response.json().catch(() => ({})); // Attempt to parse JSON, default to empty object on failure
+      const errorMessage = errorData?.error || 'Unknown error';
+      console.error(
+        `AI Decision Error - Status: ${response.status}, StatusText: ${response.statusText}, Provider: ${provider}, Model: ${modelId}, ResponseBody: ${JSON.stringify(errorData)}`
+      );
+      throw new Error(`AI decision request failed: ${response.status} ${response.statusText} - ${errorMessage}`);
     }
 
     const data = await response.json();
+    const decisionText = data.text?.toUpperCase() || '';
 
-    // Extract decision from response - look for HIT or STAND
-    const decisionText = data.text.toUpperCase();
-    const decision = decisionText.includes('HIT') ? 'HIT' : 'STAND'; // Default to STAND if HIT not found
-    console.log(`AI (${modelId}) decision: ${decision} (Raw: "${data.text.substring(0, 50)}...")`);
+    // More robust decision parsing
+    let decision: 'HIT' | 'STAND';
+    if (decisionText.includes('HIT')) {
+      decision = 'HIT';
+    } else if (decisionText.includes('STAND')) {
+      decision = 'STAND';
+    } else {
+      console.warn(`AI (${modelId}) provided ambiguous decision: "${data.text}". Defaulting to STAND.`);
+      decision = 'STAND'; // Default to STAND if neither is clearly found
+    }
+    
+    console.log(`AI (${modelId}) decision: ${decision} (Raw: "${data.text?.substring(0,100) || ''}...")`);
     return decision;
   } catch (error) {
-    console.error(`Error getting AI decision for model ${modelId}:`, error);
+    console.error(`Error in getAIDecision for model ${modelId}:`, error instanceof Error ? error.message : error);
     // Fallback to basic strategy
     return playerScore < 17 ? 'HIT' : 'STAND';
   }

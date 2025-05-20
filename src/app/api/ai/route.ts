@@ -19,28 +19,32 @@ export async function POST(req: NextRequest) {
     }
 
     let result;
-    let apiKey: string | undefined;
+    // API keys are expected to be picked up automatically from environment variables:
+    // GOOGLE_GENERATIVE_AI_API_KEY for google
+    // GROQ_API_KEY for groq
+    console.log('GOOGLE_GENERATIVE_AI_API_KEY:', process.env.GOOGLE_GENERATIVE_AI_API_KEY);
+    console.log('GROQ_API_KEY:', process.env.GROQ_API_KEY);
 
     if (provider === 'google') {
-      apiKey = process.env.GOOGLE_API_KEY;
-      if (!apiKey) {
-        console.error('Google API Key is missing in environment variables.');
-        return NextResponse.json({ error: 'Google API Key is missing' }, { status: 500 });
+      // Check if the necessary environment variable is set
+      if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+        console.error('Google Generative AI API Key is missing in environment variables.');
+        return NextResponse.json({ error: 'Google Generative AI API Key is missing' }, { status: 500 });
       }
       console.log('Using Google provider with model:', model);
       result = await generateText({
-        model: google(model), // apiKey is read from environment variable
+        model: google(model), // Rely on environment variable for API key
         prompt,
       });
     } else if (provider === 'groq') {
-      apiKey = process.env.GROQ_API_KEY;
-      if (!apiKey) {
+      // Check if the necessary environment variable is set
+      if (!process.env.GROQ_API_KEY) {
         console.error('Groq API Key is missing in environment variables.');
         return NextResponse.json({ error: 'Groq API Key is missing' }, { status: 500 });
       }
       console.log('Using Groq provider with model:', model);
       result = await generateText({
-        model: groq(model), // apiKey is read from environment variable
+        model: groq(model), // Rely on environment variable for API key
         prompt,
       });
     } else {
@@ -48,30 +52,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Invalid provider: ${provider}` }, { status: 400 });
     }
 
-    console.log(`API Response - Model: ${model}, Text: ${result.text.substring(0, 50)}...`);
+    console.log(`API Response - Model: ${model}, Text: ${result.text?.substring(0, 100) || ''}...`);
     return NextResponse.json({ text: result.text });
 
   } catch (error: unknown) {
-    console.error('Error in AI processing:', error);
-
-    let errorMessage = 'AI processing failed';
-    let statusCode = 500;
-
-    // Handle error as unknown, check for Error shape
-    if (typeof error === 'object' && error !== null) {
-      const err = error as { message?: string; type?: string; code?: string };
-      if (err.message) {
-        errorMessage = err.message;
-      }
-      if (err.type === 'authentication_error') {
-        statusCode = 401;
-      } else if (err.type === 'invalid_request_error') {
-        statusCode = 400;
-      }
-    } else if (typeof error === 'string') {
-      errorMessage = error;
-    }
-
-    return NextResponse.json({ error: errorMessage }, { status: statusCode });
+    console.error('Error generating text:', error);
+    return NextResponse.json({ error: 'An error occurred while generating text' }, { status: 500 });
   }
 }

@@ -40,9 +40,10 @@ export enum PlayerType {
 // AI Model options (using specific model IDs)
 // Ensure these model IDs are supported by the respective providers (Google AI SDK, Groq AI SDK)
 export enum AIModel {
-  GEMINI_1_5_FLASH = 'gemini-1.5-flash-latest', // Google Model
+  GEMINI_2_5_FLASH = 'gemini-2.5-flash-preview-04-17', // Added Google Model
   LLAMA3_70B = 'llama3-70b-8192',             // Groq Model
   LLAMA3_8B = 'llama3-8b-8192',               // Groq Model (Smaller)
+  LLAMA3_3_70B = 'llama-3.3-70b-versatile',   // Added Groq Model
   // Add more models here if needed, clearly indicating the provider if ambiguous
 }
 

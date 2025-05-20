@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GameActionType, GamePhase, PlayerType, AIModel } from '../types/blackjack'; // Import AIModel
+import { getProviderForModel, AIProvider } from '../services/aiService'; // Import helper and enum
 
 interface PlayerManagerProps {
   players: Array<{ 
@@ -25,7 +26,7 @@ const PlayerManager: React.FC<PlayerManagerProps> = ({
   const [newPlayerName, setNewPlayerName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [isAddingAI, setIsAddingAI] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AIModel>(AIModel.GEMINI_FLASH); // Changed state name
+  const [selectedModel, setSelectedModel] = useState<AIModel>(AIModel.GEMINI_2_5_FLASH); // Corrected enum member
   
   // Can only modify players during betting phase
   const canModifyPlayers = gamePhase === GamePhase.BETTING;
@@ -179,11 +180,17 @@ const PlayerManager: React.FC<PlayerManagerProps> = ({
                 onChange={(e) => setSelectedModel(e.target.value as AIModel)}
                 className="px-3 py-2 bg-gray-700 text-white rounded-lg border-none focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-2"
               >
-                {Object.entries(AIModel).map(([key, value]) => (
-                  <option key={value} value={value}>
-                    {key.replace('_', ' ')} ({value.startsWith('models/') ? 'Google' : 'Groq'}) 
-                  </option>
-                ))}
+                {Object.entries(AIModel).map(([key, modelValue]) => {
+                  const provider = getProviderForModel(modelValue as AIModel);
+                  const providerName = provider === AIProvider.Google ? 'Google' : 'Groq';
+                  // Create a more descriptive name, e.g., "Llama3 8B (Groq)" or "Gemini 1.5 Flash (Google)"
+                  const displayName = `${key.replace(/_/g, ' ').replace(/LLAMA3/i, 'Llama3').replace(/GEMINI/i, 'Gemini')} (${providerName})`;
+                  return (
+                    <option key={modelValue} value={modelValue}>
+                      {displayName}
+                    </option>
+                  );
+                })}
               </select>
               
               <div className="flex gap-2">
